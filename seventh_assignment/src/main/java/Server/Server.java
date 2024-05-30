@@ -1,5 +1,8 @@
 package Server;
 import ClientHandler.ClientHandler;
+import User.User;
+
+import java.io.File;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -14,17 +17,27 @@ public class Server {
     // Port to listen for incoming connections
     private static final int PORT = 3000;
     // List to hold connected clients
-    private static ArrayList<Socket> clients = new ArrayList<>();
+    public static ArrayList<User> clients = new ArrayList<>();
     // Thread pool to manage client connections efficiently
-    private static ExecutorService pool = Executors.newFixedThreadPool(4);
+    private static ExecutorService pool = Executors.newFixedThreadPool(32);
     // hashmap for save member and their socket
     HashMap<String, Integer> ClientSocket  = new HashMap<>();
+
+    public static ArrayList<User> getClients() {
+        return clients;
+    }
+
+    public static void setClients(ArrayList<User> clients) {
+        Server.clients = clients;
+    }
+
     /**
      * Main method to start the WebSocket server.
      *
      * @param args Command line arguments (not used)
      */
     public static void main(String[] args) {
+
         ServerSocket listener = null;
         try {
             // Start listening on the specified port
@@ -36,11 +49,8 @@ public class Server {
                 // Accept a new client connection
                 Socket client = listener.accept();
                 System.out.println("[SERVER] Connected to client: " + client.getInetAddress());
-
                 // Create a new client handler thread to handle client requests
-                ClientHandler clientThread = new ClientHandler(client, clients);
-                // Add the client socket to the list of connected clients
-                clients.add(client);
+                ClientHandler clientThread = new ClientHandler(client);
                 // Execute the client handler thread in the thread pool
                 pool.execute(clientThread);
             }
@@ -60,4 +70,5 @@ public class Server {
             pool.shutdown();
         }
     }
+
 }

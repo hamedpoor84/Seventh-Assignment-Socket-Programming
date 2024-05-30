@@ -1,29 +1,32 @@
 package ClientHandler;
 
+import User.User;
+
 import java.io.*;
 import java.net.Socket;
+import java.nio.file.*;
 import java.util.ArrayList;
+import java.util.List;
+
+import static Server.Server.clients;
 
 /**
  * Handles communication with a single client in the WebSocket server.
  */
 public class ClientHandler implements Runnable {
     private Socket client; // The client socket
-    private static ArrayList<Socket> clients; // List of all connected clients
     private DataInputStream in; // Input stream to receive data from the client
     private DataOutputStream out; // Output stream to send data to the client
-    private static String[] names = {"Jack", "Daniel", "Wiliam", "Hobob", "Danzel", "Kate", "michel"}; // Array of random names
-    ArrayList<String> requests = new ArrayList<>();
+    private static final List<String> messages = new ArrayList<>();
+    private static final List<Path> nameOfFiles = new ArrayList<>();
 
     /**
      * Constructor to initialize a ClientHandler object.
      *
-     * @param client  The client socket
-     * @param clients List of all connected clients
+     * @param client The client socket
      * @throws IOException If an I/O error occurs while setting up input and output streams
      */
-    public ClientHandler(Socket client, ArrayList<Socket> clients) throws IOException {
-        this.clients = clients;
+    public ClientHandler(Socket client) throws IOException {
         this.client = client;
         // Initialize input and output streams for communication with the client
         this.in = new DataInputStream(client.getInputStream());
@@ -37,31 +40,36 @@ public class ClientHandler implements Runnable {
     public void run() {
         try {
             String request;
-            // Continuously listen for client requests
+            String name = this.in.readUTF();
+            User user = new User(client, name);
+            clients.add(user);
+            sendToAll("((( " + name + " add to Server )))", client);
+
             while (true) {
-                sendToAll("(((  New member add to Server  ))) " , client);
-                // Read client request from the input stream
                 request = this.in.readUTF();
-                // Process client request
-                if (request != null) {
-                    if (request.startsWith("name")) {
-                        // Respond with a random name if the request is for a name
-                        this.out.writeUTF("Hi " + getRandomName());
-                    } else {
-                        // Otherwise, broadcast the message to all connected clients
-                        sendToAll(request , client);
+                switch (request) {
+                    case "1" -> {
+                        sendChatHistory();
+                        while (true) {
+                            request = this.in.readUTF();
+                            synchronized (messages) {
+                                messages.add(request);
+                            }
+                            sendToAll(request, client);
+                            System.out.println("[SERVER] request: " + request);
+                        }
                     }
-                    // Print the received request on the server console
-                    System.out.println("[SERVER] request: " + request);
+                    case "2" -> receiveFile();
+                    case "3" -> sendFile();
+                    case "4" -> {
+                        return;
+                    }
                 }
             }
         } catch (IOException e) {
-            // Handle any I/O exceptions that occur during communication with the client
-            System.err.println("IO Exception in client handler!!!!!!");
             e.printStackTrace();
         } finally {
             try {
-                // Close input and output streams and the client socket when done
                 in.close();
                 out.close();
                 client.close();
@@ -71,28 +79,110 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    /**
-     * Generates and returns a random name from the array of names.
-     *
-     * @return A random name
-     */
-    private String getRandomName() {
-        return names[(int) (Math.random() * names.length)];
-    }
-
-    /**
-     * Broadcasts a message to all connected clients.
-     *
-     * @param msg The message to broadcast
-     * @throws IOException If an I/O error occurs while sending the message to clients
-     */
-    private void sendToAll(String msg , Socket client ) throws IOException {
-        for (Socket aClient : clients ) {
-            // Get the output stream of each client and send the message
-            if (!aClient.equals(this.client)) {
-                DataOutputStream out = new DataOutputStream(aClient.getOutputStream());
-                out.writeUTF(msg);
+    private void sendToAll(String msg, Socket client) throws IOException {
+        synchronized (clients) {
+            for (User aClient : clients) {
+                if (!aClient.getSocket().equals(this.client)) {
+                    DataOutputStream out = new DataOutputStream(aClient.getSocket().getOutputStream());
+                    out.writeUTF(msg);
+                    out.flush();
+                }
             }
         }
+    }
+
+    private void sendChatHistory() throws IOException {
+        synchronized (messages) {
+            if (messages.size() >= 10) {
+                messages.remove(0);
+            }
+            for (String message : messages) {
+                out.writeUTF(message);
+                out.flush();
+            }
+        }
+    }
+
+    private void receiveFile() throws IOException {
+        System.out.println("start.");
+        String nameOfFile = this.in.readUTF();
+        try (InputStream inputStream = client.getInputStream();
+             DataInputStream dataInputStream = new DataInputStream(inputStream);
+             FileOutputStream fileOutputStream = new FileOutputStream("seventh_assignment\\src\\main\\Resources\\ServerData\\" + nameOfFile)) {
+
+            byte[] buffer = new byte[4096];
+            int bytesRead;
+
+            while ((bytesRead = dataInputStream.read(buffer)) != -1) {
+                String message = new String(buffer, 0, bytesRead);
+                fileOutputStream.write(buffer, 0, bytesRead);
+                if (message.contains("FILE_END")) {
+                    break;
+                }
+            }
+
+            System.out.println("File received successfully.");
+        } catch (IOException e) {
+            System.out.println("Error receiving file: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private void sendFile() {
+        String folderPath = "seventh_assignment\\src\\main\\Resources\\ServerData";
+        Path folder = Paths.get(folderPath);
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(folder, "*.txt")) {
+            synchronized (nameOfFiles) {
+                nameOfFiles.clear();
+                for (Path file : stream) {
+                    nameOfFiles.add(file.getFileName());
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("Error: " + e.getMessage());
+        }
+
+        try {
+            sendFileNames();
+            String fileRequest = this.in.readUTF();
+
+            Path fileName;
+            synchronized (nameOfFiles) {
+                fileName = nameOfFiles.get(Integer.parseInt(fileRequest)-1);
+            }
+            File file = new File(folderPath + "\\" + fileName);
+            if (file.exists() && !file.isDirectory()) {
+                try (FileInputStream fileInputStream = new FileInputStream(file)) {
+                    byte[] buffer = new byte[4096];
+                    int bytesRead;
+                    while ((bytesRead = fileInputStream.read(buffer)) != -1) {
+                        out.write(buffer, 0, bytesRead);
+                    }
+                    // Send a special message indicating end of file transfer
+                    out.writeUTF("FILE_END");
+                    out.flush();
+                    System.out.println("File sent successfully.");
+                } catch (IOException e) {
+                    System.out.println("Error sending file: " + e.getMessage());
+                    e.printStackTrace();
+                }
+            } else {
+                System.out.println("File does not exist or is a directory.");
+            }
+        } catch (IOException e) {
+            System.out.println("Error: " + e.getMessage());
+        }
+    }
+
+    private void sendFileNames() throws IOException {
+        out.writeUTF("Choose the file you want:");
+        int counter = 1;
+        synchronized (nameOfFiles) {
+            for (Path path : nameOfFiles) {
+                out.writeUTF(counter + "- " + path.toString());
+                counter++;
+            }
+        }
+        out.flush();
     }
 }

@@ -31,9 +31,10 @@ public class HandleServerResponse implements Runnable {
             // Continuously listen for server responses
             while (true) {
                 // Read server response from the input stream and print it to the console
-                System.out.println(this.in.readUTF());
+                String message = this.in.readUTF();
+                System.out.println(message);
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
             // Handle any I/O exceptions that occur while reading server responses
             throw new RuntimeException(e);
         }
